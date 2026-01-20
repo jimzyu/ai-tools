@@ -1,4 +1,5 @@
 📖 Biblical Theme Tool
+
 A specialized research assistant designed for Bible study, utilizing Google Gemini-3-Flash AI to provide theological analysis and historical context for biblical passages.
 
 ✨ Key Features
