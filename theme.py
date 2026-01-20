@@ -1,10 +1,15 @@
 import streamlit as st
 import google.generativeai as genai
 from opencc import OpenCC
+import time # 用於處理 429 錯誤
 
-# 1. 程式設定與 API 金鑰
-# 在正式部署時，請替換為您的 Secrets 設定
-API_KEY = "AIzaSyCNjnop5WTgpARAef50S_roSWgRx08kMoE"
+# 1. 程式設定與 API 金鑰 (安全讀取方式)
+# 在部署到 Streamlit Cloud 後，這會從 "Secrets" 設定中讀取
+try:
+    API_KEY = st.secrets["GEMINI_API_KEY"]
+except:
+    API_KEY = "000000" # 本地測試時暫用
+
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
@@ -51,12 +56,15 @@ if st.button("生成摘要 Generate Summary"):
                 - **Theme Title**: 
                 - **Theological Significance**: 
                 - **Historical Context**: 
-                """
-                
+                """            
+
                 response = model.generate_content(prompt)
                 st.session_state.ai_result = response.text
             except Exception as e:
-                st.error(f"發生錯誤: {e}")
+                if "429" in str(e):
+                    st.warning("系統繁忙，請稍候 30 秒再試一次。 (Rate limit reached, please wait.)")
+                else:
+                    st.error(f"發生錯誤: {e}") 
     else:
         st.error("請輸入有效的經文引用。")
 
