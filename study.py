@@ -15,15 +15,15 @@ if not API_KEY:
     st.error("⚠️ API Key not found. Please set 'GEMINI_API_KEY' in your Streamlit Secrets.")
     st.stop()
 
-# Initialize Gemini with stricter System Instructions
+# Initialize Gemini with the preferred model and strict validation instructions
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel(
-    model_name='gemini-2.5-flash',
+    model_name='gemini-3-flash-preview',
     system_instruction=(
         "You are a Chinese-American pastor with a conservative evangelical background. "
         "Your primary role is to provide Bible study guides. "
         "CRITICAL RULE: If the user input is NOT a biblical reference, passage, or book name "
-        "(e.g., 'Chicken Soup', 'Batman', 'How to cook'), you must respond ONLY with the word '[INVALID_REF]'. "
+        "(e.g., 'Chicken Soup', 'Batman'), you must respond ONLY with the word '[INVALID_REF]'. "
         "If it is a valid reference, provide the study guide in [CHINESE] and [ENGLISH] tags."
     )
 )
@@ -48,7 +48,8 @@ def parse_ai_response(text):
     return ch_content, en_content
 
 def render_study_content(content):
-    """Splits content into Questions and Summary with header detection for Simp/Trad."""
+    """Splits content into Questions and Summary with flexible header detection."""
+    # Added both Traditional and Simplified headers to ensure the drop-down works in all tabs
     headers = ["### 主題摘要", "### 主题摘要", "### Theme Summary"]
     questions = content
     summary = None
@@ -86,15 +87,18 @@ if st.button("開始研讀 Start Study", type="primary"):
     if reference.strip():
         with st.spinner('正在驗證並準備內容...'):
             try:
-                # Prompt includes a validation requirement
+                # Validation check inside the user prompt
                 user_prompt = f"""
                 Analyze the following reference: "{reference}".
-                If it is a Bible verse or passage, provide the study guide.
-                If it is not a Bible passage, reply with [INVALID_REF].
+                If it is a Bible passage, provide the study guide.
+                If it is not a Bible passage, reply ONLY with [INVALID_REF].
 
                 [CHINESE]
                 ### 啟發式提問
-                ...
+                1. **觀察 (Observation)**:
+                2. **解釋 (Interpretation)**:
+                3. **應用 (Application)**:
+                
                 ### 主題摘要
                 ...
 
@@ -113,8 +117,8 @@ if st.session_state.ai_result:
     ch_text, en_text = parse_ai_response(st.session_state.ai_result)
     
     if ch_text is None:
-        st.error("❌ 無法識別該經文引用。請輸入有效的聖經章節（例如：約翰福音 3:16）。")
-        st.info("Invalid scriptural reference. Please enter a valid Bible passage (e.g., John 3:16).")
+        st.error("❌ 無法識別該經文引用。請輸入有效的聖經章節。")
+        st.info("Invalid scriptural reference. Please enter a valid Bible passage.")
     else:
         sim_text = cc.convert(ch_text)
         st.divider()
