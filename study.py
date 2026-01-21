@@ -58,9 +58,6 @@ def render_study_content(content):
 
     questions = parts[0].strip()
     summary = parts[1].strip() if len(parts) > 1 else None
-
-    st.subheader("📝 啟發式提問 (Reflection Questions)")
-    st.markdown(questions)
     
     if summary:
         with st.expander("📖 查看主題摘要 (View Theme Summary)"):
