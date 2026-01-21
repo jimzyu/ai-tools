@@ -19,7 +19,7 @@ if not API_KEY:
 # Initialize Gemini with System Instructions for consistent persona
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel(
-    model_name='gemini-3-flash-preview',
+    model_name='gemini-2.5-flash', # Using stable 1.5-flash
     system_instruction=(
         "You are a Chinese-American pastor with a conservative evangelical background. "
         "Provide a study guide consisting of 3 reflection questions (Observation, Interpretation, Application) "
@@ -33,14 +33,13 @@ cc = OpenCC('t2s')
 
 # 2. Helper Functions
 def parse_ai_response(text):
-    """Uses regex to reliably extract Chinese and English sections, avoiding IndexErrors."""
+    """Uses regex to reliably extract Chinese and English sections."""
     ch_pattern = r"\[CHINESE\](.*?)\[ENGLISH\]"
     en_pattern = r"\[ENGLISH\](.*)"
     
     ch_match = re.search(ch_pattern, text, re.DOTALL | re.IGNORECASE)
     en_match = re.search(en_pattern, text, re.DOTALL | re.IGNORECASE)
     
-    # Fallback: If tags are missing, treat the whole thing as Chinese for safety
     ch_content = ch_match.group(1).strip() if ch_match else text
     en_content = en_match.group(1).strip() if en_match else "English translation not available."
     
@@ -48,16 +47,18 @@ def parse_ai_response(text):
 
 def render_study_content(content):
     """Splits content into Questions and Summary and renders them in the UI."""
-    # Look for the 'Theme Summary' header in either language
-    if "### 主題摘要" in content:
-        parts = content.split("### 主題摘要")
-    elif "### Theme Summary" in content:
-        parts = content.split("### Theme Summary")
-    else:
-        parts = [content]
+    # List of possible headers to split on (Traditional, Simplified, and English)
+    headers = ["### 主題摘要", "### 主题摘要", "### Theme Summary"]
+    
+    questions = content
+    summary = None
 
-    questions = parts[0].strip()
-    summary = parts[1].strip() if len(parts) > 1 else None
+    for header in headers:
+        if header in content:
+            parts = content.split(header)
+            questions = parts[0].strip()
+            summary = parts[1].strip() if len(parts) > 1 else None
+            break # Stop once we find the matching header
 
     st.subheader("📝 啟發式提問 (Reflection Questions)")
     st.markdown(questions)
@@ -72,11 +73,9 @@ st.subheader("Biblical Study & Theme Tool")
 st.markdown("輸入經文引用以獲取啟發提問與深度摘要。")
 st.markdown("---")
 
-# Session State for results
 if 'ai_result' not in st.session_state:
     st.session_state.ai_result = None
 
-# User Input
 reference = st.text_input(
     "經文引用 Scriptural Reference", 
     placeholder="例如: Matthew 14:1-36"
@@ -87,7 +86,6 @@ if st.button("開始研讀 Start Study", type="primary"):
     if reference.strip():
         with st.spinner('正在準備研讀內容...'):
             try:
-                # Optimized Prompt for the new structure
                 user_prompt = f"""
                 Provide a study guide for: {reference}.
                 
@@ -105,7 +103,6 @@ if st.button("開始研讀 Start Study", type="primary"):
                 [ENGLISH]
                 (Translate the content above exactly)
                 """
-                
                 response = model.generate_content(user_prompt)
                 st.session_state.ai_result = response.text
             except Exception as e:
@@ -119,15 +116,11 @@ if st.session_state.ai_result:
     sim_text = cc.convert(ch_text)
     
     st.divider()
-    
-    # Main Navigation: Language-based tabs
     tab1, tab2, tab3 = st.tabs(["繁體中文", "简体中文", "English"])
     
     with tab1:
         render_study_content(ch_text)
-    
     with tab2:
         render_study_content(sim_text)
-        
     with tab3:
         render_study_content(en_text)
