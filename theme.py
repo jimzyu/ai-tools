@@ -3,118 +3,84 @@ import google.generativeai as genai
 from opencc import OpenCC
 import re
 
-# 1. Configuration & Security
-st.set_page_config(page_title="聖經主題工具 | Biblical Theme Tool", layout="centered")
+# 1. Setup
+st.set_page_config(page_title="聖經研讀工具 | Bible Study Tool", layout="centered")
 
-# Attempt to load API Key
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
-except Exception:
+except:
     API_KEY = None
 
 if not API_KEY:
-    st.error("⚠️ API Key not found. Please set 'GEMINI_API_KEY' in your Streamlit Secrets.")
+    st.error("API Key missing.")
     st.stop()
 
-# Initialize Gemini with System Instructions for consistent persona
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel(
-    model_name='gemini-3-flash-preview',
-    system_instruction=(
-        "You are a Chinese-American pastor with a conservative evangelical background. "
-        "Your goal is to provide deep, concise theological summaries. "
-        "Always output in the requested [CHINESE] and [ENGLISH] format. "
-        "The English section must be a direct and faithful translation of the Chinese section."
-    )
+    model_name='gemini-2.5-flash',
+    system_instruction="You are a Chinese-American pastor. Provide a study guide with 3 reflection questions followed by a theme summary."
 )
-
-# Initialize Simplified/Traditional converter
 cc = OpenCC('t2s')
 
-# 2. Helper Functions
-def parse_ai_response(text):
-    """Uses regex to reliably extract Chinese and English sections."""
-    # Pattern to find content between [CHINESE] and [ENGLISH]
-    ch_pattern = r"\[CHINESE\](.*?)\[ENGLISH\]"
-    # Pattern to find content after [ENGLISH]
-    en_pattern = r"\[ENGLISH\](.*)"
+# 2. Updated Prompt Logic
+def get_ai_response(ref):
+    prompt = f"""
+    Provide a study guide for: {ref}.
     
-    ch_match = re.search(ch_pattern, text, re.DOTALL | re.IGNORECASE)
-    en_match = re.search(en_pattern, text, re.DOTALL | re.IGNORECASE)
+    [CHINESE]
+    ### 啟發式提問 (Reflection Questions)
+    1. **觀察 (Observation)**: (Question about what is happening)
+    2. **解釋 (Interpretation)**: (Question about the meaning)
+    3. **應用 (Application)**: (Question about personal change)
     
-    ch_content = ch_match.group(1).strip() if ch_match else text
-    en_content = en_match.group(1).strip() if en_match else "Parsing error. Please try again."
-    
-    # Remove any AI 'meta-talk' or parenthetical instructions
-    en_content = re.sub(r"\(The English content below.*?\)", "", en_content, flags=re.IGNORECASE).strip()
-    
-    return ch_content, en_content
+    ### 主題摘要 (Theme Summary)
+    - **主題名稱**: 
+    - **神學意義**: 
+    - **歷史背景**: 
 
-# 3. UI Layout
-st.title("📖 聖經主題工具")
-st.subheader("Biblical Theme Tool")
-st.markdown("---")
+    [ENGLISH]
+    (Exact translation of the Chinese sections above)
+    """
+    response = model.generate_content(prompt)
+    return response.text
 
-# Session State for results
-if 'ai_result' not in st.session_state:
-    st.session_state.ai_result = None
+# 3. UI
+st.title("📖 聖經研讀工具")
+st.markdown("輸入經文以獲取啟發提問與主題摘要。")
 
-# Sidebar for controls
-with st.sidebar:
-    st.header("Settings & Tools")
-    if st.button("清除結果 Clear Results"):
-        st.session_state.ai_result = None
-        st.rerun()
+reference = st.text_input("經文引用 (e.g., Matthew 14:1-36)", placeholder="Matthew 14:1-36")
 
-# User Input
-reference = st.text_input(
-    "經文引用 Scriptural Reference", 
-    placeholder="例如: John 3:16 or 馬太福音 5:3-10"
-)
-
-# 4. Logic Execution
-if st.button("生成摘要 Generate Summary", type="primary"):
-    if reference.strip():
-        with st.spinner('正在進行諮詢 Consulting the text...'):
-            try:
-                # Optimized Prompt
-                user_prompt = f"""
-                Provide a summary for: {reference}.
-                
-                Format:
-                [CHINESE]
-                - **主題名稱**: (4-8 Traditional Chinese characters)
-                - **神學意義說明**: (2 sentences)
-                - **歷史背景補充**: (Contextual details)
-
-                [ENGLISH]
-                (Translate the above Chinese content exactly)
-                """
-                
-                response = model.generate_content(user_prompt)
-                st.session_state.ai_result = response.text
-            except Exception as e:
-                if "429" in str(e):
-                    st.warning("系統繁忙，請稍候 30 秒再試。 (Rate limit reached.)")
-                else:
-                    st.error(f"Error: {e}")
+if st.button("開始研讀 Start Study", type="primary"):
+    if reference:
+        with st.spinner('正在準備內容...'):
+            st.session_state.raw_output = get_ai_response(reference)
     else:
-        st.warning("請輸入有效的經文引用。 Please enter a reference.")
+        st.warning("請輸入經文。")
 
-# 5. Display Results
-if st.session_state.ai_result:
-    ch_text, en_text = parse_ai_response(st.session_state.ai_result)
-    sim_text = cc.convert(ch_text)
-    
+# 4. Display Logic
+if 'raw_output' in st.session_state:
+    # Parsing logic (using simple split for demonstration, Regex recommended for production)
+    full_text = st.session_state.raw_output
+    ch_section = full_text.split("[CHINESE]")[1].split("[ENGLISH]")[0].strip()
+    en_section = full_text.split("[ENGLISH]")[1].strip()
+    sim_section = cc.convert(ch_section)
+
     st.divider()
-    
     tab1, tab2, tab3 = st.tabs(["繁體中文", "简体中文", "English"])
-    
-    with tab1:
-        st.markdown(ch_text)
-    
-    with tab2:
-        st.markdown(sim_text)
+
+    def render_content(content, lang_label):
+        # Split the content into Questions and Summary parts
+        parts = content.split("### 主題摘要") if "### 主題摘要" in content else content.split("### Theme Summary")
         
-    with tab3:
-        st.markdown(en_text)
+        questions = parts[0]
+        summary = parts[1] if len(parts) > 1 else ""
+
+        st.subheader("📝 啟發式提問")
+        st.markdown(questions)
+        
+        with st.expander("查看主題摘要 (View Theme Summary)"):
+            st.markdown(summary)
+
+    with tab1: render_content(ch_section, "繁體")
+    with tab2: render_content(sim_section, "简体")
+    with tab3: render_content(en_section, "English")
