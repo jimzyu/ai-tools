@@ -104,9 +104,9 @@ if st.button("開始研讀 Start Study", type="primary"):
                 3. **應用 (Application)**: (Question about life)
                 
                 ### 主題摘要
-                - **主題名稱**: 
-                - **神學意義說明**: 
-                - **歷史背景補充**: 
+                - **主題名稱**: (4-8個繁體中文字)
+                - **神學意義說明**: (約兩句話，深入淺出)
+                - **歷史背景補充**: (若適用，請提到特定背景如：流亡時期、受難週等)
 
                 [ENGLISH]
                 (Translate the content above exactly)
