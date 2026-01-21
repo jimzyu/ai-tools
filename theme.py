@@ -1,103 +1,120 @@
 import streamlit as st
 import google.generativeai as genai
 from opencc import OpenCC
-import time # 用於處理 429 錯誤
+import re
 
-# 1. 程式設定與 API 金鑰 (安全讀取方式)
-# 在部署到 Streamlit Cloud 後，這會從 "Secrets" 設定中讀取
+# 1. Configuration & Security
+st.set_page_config(page_title="聖經主題工具 | Biblical Theme Tool", layout="centered")
+
+# Attempt to load API Key
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
-except:
-    API_KEY = "000000" # 本地測試時暫用
+except Exception:
+    API_KEY = None
 
+if not API_KEY:
+    st.error("⚠️ API Key not found. Please set 'GEMINI_API_KEY' in your Streamlit Secrets.")
+    st.stop()
+
+# Initialize Gemini with System Instructions for consistent persona
 genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-3-flash-preview')
+model = genai.GenerativeModel(
+    model_name='gemini-1.5-flash',
+    system_instruction=(
+        "You are a Chinese-American pastor with a conservative evangelical background. "
+        "Your goal is to provide deep, concise theological summaries. "
+        "Always output in the requested [CHINESE] and [ENGLISH] format. "
+        "The English section must be a direct and faithful translation of the Chinese section."
+    )
+)
 
-# 初始化繁簡轉換器
-cc = OpenCC('t2s') 
+# Initialize Simplified/Traditional converter
+cc = OpenCC('t2s')
 
-# 2. UI 介面設計
-st.set_page_config(page_title="聖經主題工具", layout="centered")
+# 2. Helper Functions
+def parse_ai_response(text):
+    """Uses regex to reliably extract Chinese and English sections."""
+    # Pattern to find content between [CHINESE] and [ENGLISH]
+    ch_pattern = r"\[CHINESE\](.*?)\[ENGLISH\]"
+    # Pattern to find content after [ENGLISH]
+    en_pattern = r"\[ENGLISH\](.*)"
+    
+    ch_match = re.search(ch_pattern, text, re.DOTALL | re.IGNORECASE)
+    en_match = re.search(en_pattern, text, re.DOTALL | re.IGNORECASE)
+    
+    ch_content = ch_match.group(1).strip() if ch_match else text
+    en_content = en_match.group(1).strip() if en_match else "Parsing error. Please try again."
+    
+    # Remove any AI 'meta-talk' or parenthetical instructions
+    en_content = re.sub(r"\(The English content below.*?\)", "", en_content, flags=re.IGNORECASE).strip()
+    
+    return ch_content, en_content
+
+# 3. UI Layout
 st.title("📖 聖經主題工具")
-st.title("Biblical Theme Tool")
-st.markdown("請輸入聖經經文引用（如：馬可福音 10:45）以獲取主題摘要。")
-st.markdown("Please enter biblical passages (e.g. Mark 10:45) to obtain a summary.")
+st.subheader("Biblical Theme Tool")
+st.markdown("---")
 
-# 初始化 Session State 以儲存結果
+# Session State for results
 if 'ai_result' not in st.session_state:
     st.session_state.ai_result = None
 
-# 3. 使用者輸入
-reference = st.text_input("經文引用 Scriptural Reference", placeholder="例如 e.g.: Mark 10:45")
+# Sidebar for controls
+with st.sidebar:
+    st.header("Settings & Tools")
+    if st.button("清除結果 Clear Results"):
+        st.session_state.ai_result = None
+        st.rerun()
 
-# 4. 按鈕邏輯
-if st.button("生成摘要 Generate Summary"):
-    if reference:
+# User Input
+reference = st.text_input(
+    "經文引用 Scriptural Reference", 
+    placeholder="例如: John 3:16 or 馬太福音 5:3-10"
+)
+
+# 4. Logic Execution
+if st.button("生成摘要 Generate Summary", type="primary"):
+    if reference.strip():
         with st.spinner('正在進行諮詢 Consulting the text...'):
             try:
-                # 強化後的 Prompt：要求英文必須是中文的精確翻譯
-                prompt = f"""
-                You are a Chinese-American pastor with conservative evangelical background.
-                Provide a deep, concise summary of the theme for: {reference}.
+                # Optimized Prompt
+                user_prompt = f"""
+                Provide a summary for: {reference}.
                 
-                Step 1: Write the content in Traditional Chinese first.
-                Step 2: Provide an exact English translation of that Chinese content.
-
-                Please use exactly this format with the tags [CHINESE] and [ENGLISH]. 
-                Ensure section titles are wrapped in double asterisks like **Title**:
-
+                Format:
                 [CHINESE]
-                - **主題名稱**: (4-8個繁體中文字)
-                - **神學意義說明**: (約兩句話，深入淺出)
-                - **歷史背景補充**: (若適用，請提到特定背景如：流亡時期、受難週等)
+                - **主題名稱**: (4-8 Traditional Chinese characters)
+                - **神學意義說明**: (2 sentences)
+                - **歷史背景補充**: (Contextual details)
 
                 [ENGLISH]
-                (The English content below must be an EXACT translation of the Chinese section above.)
-                - **Theme Title**: 
-                - **Theological Significance**: 
-                - **Historical Context**: 
-                """            
-
-                response = model.generate_content(prompt)
+                (Translate the above Chinese content exactly)
+                """
+                
+                response = model.generate_content(user_prompt)
                 st.session_state.ai_result = response.text
             except Exception as e:
                 if "429" in str(e):
-                    st.warning("系統繁忙，請稍候 30 秒再試一次。 (Rate limit reached, please wait.)")
+                    st.warning("系統繁忙，請稍候 30 秒再試。 (Rate limit reached.)")
                 else:
-                    st.error(f"發生錯誤: {e}") 
+                    st.error(f"Error: {e}")
     else:
-        st.error("請輸入有效的經文引用。")
+        st.warning("請輸入有效的經文引用。 Please enter a reference.")
 
-# 5. 顯示邏輯 (精確拆分內容並顯示於三個分頁)
+# 5. Display Results
 if st.session_state.ai_result:
+    ch_text, en_text = parse_ai_response(st.session_state.ai_result)
+    sim_text = cc.convert(ch_text)
+    
     st.divider()
     
-    full_text = st.session_state.ai_result
-    
-    try:
-        # 根據標籤拆分區塊
-        chinese_raw = full_text.split("[CHINESE]")[1].split("[ENGLISH]")[0].strip()
-        english_part = full_text.split("[ENGLISH]")[1].strip()
-        
-        # 移除可能出現在開頭的提示文字 (The English content below...)
-        if ")" in english_part:
-            english_part = english_part.split(")", 1)[1].strip()
-            
-    except IndexError:
-        chinese_raw = full_text
-        english_part = "無法解析格式，請重新生成。"
-
-    # 本地端將繁體內容轉換為簡體
-    simplified_text = cc.convert(chinese_raw)
-
-    # 建立三個分頁
     tab1, tab2, tab3 = st.tabs(["繁體中文", "简体中文", "English"])
     
     with tab1:
-        st.info(chinese_raw)
+        st.markdown(ch_text)
     
     with tab2:
-        st.info(simplified_text)
+        st.markdown(sim_text)
         
     with tab3:
-        st.info(english_part)
+        st.markdown(en_text)
