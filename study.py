@@ -60,7 +60,7 @@ def render_study_content(content):
             summary = parts[1].strip() if len(parts) > 1 else None
             break # Stop once we find the matching header
 
-    st.subheader("📝 啟發式提問 (Reflection Questions)")
+    st.subheader("📝 提問+小結 (Reflections & Summary)")
     st.markdown(questions)
     
     if summary:
