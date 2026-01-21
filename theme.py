@@ -19,7 +19,7 @@ if not API_KEY:
 # Initialize Gemini with System Instructions for consistent persona
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel(
-    model_name='gemini-3-flash',
+    model_name='gemini-3-flash-preview',
     system_instruction=(
         "You are a Chinese-American pastor with a conservative evangelical background. "
         "Your goal is to provide deep, concise theological summaries. "
