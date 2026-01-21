@@ -6,7 +6,6 @@ import re
 # 1. Configuration & Security
 st.set_page_config(page_title="聖經研讀工具 | Bible Study Tool", layout="centered")
 
-# Load API Key from Streamlit Secrets
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
 except Exception:
@@ -16,24 +15,27 @@ if not API_KEY:
     st.error("⚠️ API Key not found. Please set 'GEMINI_API_KEY' in your Streamlit Secrets.")
     st.stop()
 
-# Initialize Gemini with System Instructions for consistent persona
+# Initialize Gemini with stricter System Instructions
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel(
-    model_name='gemini-2.5-flash', # Using stable 1.5-flash
+    model_name='gemini-2.5-flash',
     system_instruction=(
         "You are a Chinese-American pastor with a conservative evangelical background. "
-        "Provide a study guide consisting of 3 reflection questions (Observation, Interpretation, Application) "
-        "followed by a concise theme summary. Always use the [CHINESE] and [ENGLISH] tags. "
-        "The English section must be a direct translation of the Chinese section."
+        "Your primary role is to provide Bible study guides. "
+        "CRITICAL RULE: If the user input is NOT a biblical reference, passage, or book name "
+        "(e.g., 'Chicken Soup', 'Batman', 'How to cook'), you must respond ONLY with the word '[INVALID_REF]'. "
+        "If it is a valid reference, provide the study guide in [CHINESE] and [ENGLISH] tags."
     )
 )
 
-# Initialize Simplified/Traditional converter
 cc = OpenCC('t2s')
 
 # 2. Helper Functions
 def parse_ai_response(text):
-    """Uses regex to reliably extract Chinese and English sections."""
+    """Reliably extract sections and handle invalid reference flags."""
+    if "[INVALID_REF]" in text.upper():
+        return None, None
+        
     ch_pattern = r"\[CHINESE\](.*?)\[ENGLISH\]"
     en_pattern = r"\[ENGLISH\](.*)"
     
@@ -46,10 +48,8 @@ def parse_ai_response(text):
     return ch_content, en_content
 
 def render_study_content(content):
-    """Splits content into Questions and Summary and renders them in the UI."""
-    # List of possible headers to split on (Traditional, Simplified, and English)
+    """Splits content into Questions and Summary with header detection for Simp/Trad."""
     headers = ["### 主題摘要", "### 主题摘要", "### Theme Summary"]
-    
     questions = content
     summary = None
 
@@ -58,9 +58,9 @@ def render_study_content(content):
             parts = content.split(header)
             questions = parts[0].strip()
             summary = parts[1].strip() if len(parts) > 1 else None
-            break # Stop once we find the matching header
+            break
 
-    st.subheader("📝 提問+小結 (Reflections & Summary)")
+    st.subheader("📝 啟發式提問 (Reflection Questions)")
     st.markdown(questions)
     
     if summary:
@@ -84,24 +84,22 @@ reference = st.text_input(
 # 4. Logic Execution
 if st.button("開始研讀 Start Study", type="primary"):
     if reference.strip():
-        with st.spinner('正在準備研讀內容...'):
+        with st.spinner('正在驗證並準備內容...'):
             try:
+                # Prompt includes a validation requirement
                 user_prompt = f"""
-                Provide a study guide for: {reference}.
-                
+                Analyze the following reference: "{reference}".
+                If it is a Bible verse or passage, provide the study guide.
+                If it is not a Bible passage, reply with [INVALID_REF].
+
                 [CHINESE]
                 ### 啟發式提問
-                1. **觀察 (Observation)**: (Question about facts)
-                2. **解釋 (Interpretation)**: (Question about meaning)
-                3. **應用 (Application)**: (Question about life)
-                
+                ...
                 ### 主題摘要
-                - **主題名稱**: 
-                - **神學意義說明**: 
-                - **歷史背景補充**: 
+                ...
 
                 [ENGLISH]
-                (Translate the content above exactly)
+                ...
                 """
                 response = model.generate_content(user_prompt)
                 st.session_state.ai_result = response.text
@@ -113,14 +111,15 @@ if st.button("開始研讀 Start Study", type="primary"):
 # 5. Display Results
 if st.session_state.ai_result:
     ch_text, en_text = parse_ai_response(st.session_state.ai_result)
-    sim_text = cc.convert(ch_text)
     
-    st.divider()
-    tab1, tab2, tab3 = st.tabs(["繁體中文", "简体中文", "English"])
-    
-    with tab1:
-        render_study_content(ch_text)
-    with tab2:
-        render_study_content(sim_text)
-    with tab3:
-        render_study_content(en_text)
+    if ch_text is None:
+        st.error("❌ 無法識別該經文引用。請輸入有效的聖經章節（例如：約翰福音 3:16）。")
+        st.info("Invalid scriptural reference. Please enter a valid Bible passage (e.g., John 3:16).")
+    else:
+        sim_text = cc.convert(ch_text)
+        st.divider()
+        tab1, tab2, tab3 = st.tabs(["繁體中文", "简体中文", "English"])
+        
+        with tab1: render_study_content(ch_text)
+        with tab2: render_study_content(sim_text)
+        with tab3: render_study_content(en_text)
