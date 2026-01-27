@@ -6,7 +6,6 @@ import re
 # 1. Configuration & Security
 st.set_page_config(page_title="聖經研讀工具 | Bible Study Tool", layout="centered")
 
-# Load API Key from Streamlit Secrets
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
 except Exception:
@@ -18,24 +17,29 @@ if not API_KEY:
 
 # Initialize Gemini with Gatekeeping System Instructions
 genai.configure(api_key=API_KEY)
+
+# CONFIGURATION: Lower temperature = more consistent/valid results
+generation_config = genai.types.GenerationConfig(
+    temperature=0.3  # Lower value (0.0 - 1.0) makes it more deterministic
+)
+
 model = genai.GenerativeModel(
-    model_name='gemini-2.5-flash', 
+    model_name='gemini-2.0-flash', 
+    generation_config=generation_config,
     system_instruction=(
         "You are a Chinese-American pastor with a conservative evangelical background. "
         "Your primary role is to provide Bible study guides. "
         "CRITICAL RULE: If the user input is NOT a biblical reference, passage, or book name "
-        "(e.g., 'Chicken Soup', 'Batman', 'How to cook'), you must respond ONLY with the word '[INVALID_REF]'. "
+        "(e.g., 'Chicken Soup', 'Batman'), you must respond ONLY with the word '[INVALID_REF]'. "
         "If it is a valid reference, provide the study guide in [CHINESE] and [ENGLISH] tags. "
         "The English section must be a direct translation of the Chinese section."
     )
 )
 
-# Initialize Simplified/Traditional converter
 cc = OpenCC('t2s')
 
 # 2. Helper Functions
 def parse_ai_response(text):
-    """Reliably extract sections and handle invalid reference flags."""
     if "[INVALID_REF]" in text.upper():
         return None, None
         
@@ -51,10 +55,7 @@ def parse_ai_response(text):
     return ch_content, en_content
 
 def render_study_content(content):
-    """Splits content into Questions and Summary and renders them in the UI."""
-    # List of possible headers to split on (Traditional, Simplified, and English)
     headers = ["### 主題摘要", "### 主题摘要", "### Theme Summary"]
-    
     questions = content
     summary = None
 
@@ -76,6 +77,10 @@ def render_study_content(content):
 st.title("📖 聖經研讀工具")
 st.subheader("Biblical Study & Theme Tool")
 st.markdown("輸入經文引用以獲取啟發提問與深度摘要。")
+
+# Toggle for Deep Study Mode
+deep_mode = st.checkbox("🔍 啟用深度整合模式 (Deep Study Mode - Slower but more complete)")
+
 st.markdown("---")
 
 if 'ai_result' not in st.session_state:
@@ -91,8 +96,8 @@ if st.button("開始研讀 Start Study", type="primary"):
     if reference.strip():
         with st.spinner('正在驗證並準備內容...'):
             try:
-                # Merged prompt: includes the structure of study_good and the validation of study_check
-                user_prompt = f"""
+                # Base Prompt
+                base_prompt = f"""
                 Analyze the following reference: "{reference}".
                 If it is a Bible verse or passage, provide the study guide.
                 If it is not a Bible passage, reply ONLY with [INVALID_REF].
@@ -104,15 +109,43 @@ if st.button("開始研讀 Start Study", type="primary"):
                 3. **應用 (Application)**: (Question about life)
                 
                 ### 主題摘要
-                - **簡要主題**: (4-8個繁體中文字)
+                - **主題名稱**: (4-8個繁體中文字)
                 - **神學意義說明**: (約兩句話，深入淺出)
                 - **歷史背景補充**: (若適用，請提到特定背景如：流亡時期、受難週等)
 
                 [ENGLISH]
                 (Translate the content above exactly)
                 """
-                response = model.generate_content(user_prompt)
-                st.session_state.ai_result = response.text
+
+                if deep_mode:
+                    # Step 1: Generate Draft A
+                    draft_a = model.generate_content(base_prompt).text
+                    if "[INVALID_REF]" in draft_a:
+                        st.session_state.ai_result = "[INVALID_REF]"
+                    else:
+                        # Step 2: Generate Draft B (Ask for a different perspective)
+                        draft_b = model.generate_content(base_prompt + "\n (Focus on slightly different theological nuances)").text
+                        
+                        # Step 3: Consolidate
+                        merge_prompt = f"""
+                        I have two study guides for {reference}. Please combine them into ONE superior version.
+                        - Keep the best questions from both.
+                        - Merge the historical and theological insights to be more complete.
+                        - STRICTLY follow the [CHINESE] and [ENGLISH] format.
+
+                        Draft A:
+                        {draft_a}
+
+                        Draft B:
+                        {draft_b}
+                        """
+                        final_response = model.generate_content(merge_prompt)
+                        st.session_state.ai_result = final_response.text
+                else:
+                    # Standard Mode (Fast)
+                    response = model.generate_content(base_prompt)
+                    st.session_state.ai_result = response.text
+
             except Exception as e:
                 st.error(f"發生錯誤 (Error): {e}")
     else:
