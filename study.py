@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 from opencc import OpenCC
 import re
+import time
 
 # 1. Configuration & Security
 st.set_page_config(page_title="聖經研讀工具 | Bible Study Tool", layout="centered")
@@ -15,16 +16,12 @@ if not API_KEY:
     st.error("⚠️ API Key not found. Please set 'GEMINI_API_KEY' in your Streamlit Secrets.")
     st.stop()
 
-# Initialize Gemini with Gatekeeping System Instructions
+# Initialize Gemini with a lower temperature for consistency
 genai.configure(api_key=API_KEY)
-
-# CONFIGURATION: Lower temperature = more consistent/valid results
-generation_config = genai.types.GenerationConfig(
-    temperature=0.3  # Lower value (0.0 - 1.0) makes it more deterministic
-)
+generation_config = genai.types.GenerationConfig(temperature=0.3)
 
 model = genai.GenerativeModel(
-    model_name='gemini-2.5-flash', 
+    model_name='gemini-2.5-pro', 
     generation_config=generation_config,
     system_instruction=(
         "You are a Chinese-American pastor with a conservative evangelical background. "
@@ -78,8 +75,8 @@ st.title("📖 聖經研讀工具")
 st.subheader("Biblical Study & Theme Tool")
 st.markdown("輸入經文引用以獲取啟發提問與深度摘要。")
 
-# Toggle for Deep Study Mode
-deep_mode = st.checkbox("🔍 啟用深度整合模式 (Deep Study Mode - Slower but more complete)")
+# Deep Mode Toggle
+deep_mode = st.checkbox("🔍 啟用深度整合模式 (Deep Study Mode - Generates 3 drafts & merges them)")
 
 st.markdown("---")
 
@@ -94,13 +91,16 @@ reference = st.text_input(
 # 4. Logic Execution
 if st.button("開始研讀 Start Study", type="primary"):
     if reference.strip():
-        with st.spinner('正在驗證並準備內容...'):
+        # Using a status container for better UX during long waits
+        with st.status("正在進行深度研讀 (Conducting Deep Study)...", expanded=True) as status:
             try:
-                # Base Prompt
-                base_prompt = f"""
-                Analyze the following reference: "{reference}".
+                # Base Prompt Structure
+                base_prompt_template = """
+                Analyze the following reference: "{ref}".
                 If it is a Bible verse or passage, provide the study guide.
                 If it is not a Bible passage, reply ONLY with [INVALID_REF].
+
+                Context focus: {focus}
 
                 [CHINESE]
                 ### 啟發式提問
@@ -118,36 +118,56 @@ if st.button("開始研讀 Start Study", type="primary"):
                 """
 
                 if deep_mode:
-                    # Step 1: Generate Draft A
-                    draft_a = model.generate_content(base_prompt).text
-                    if "[INVALID_REF]" in draft_a:
-                        st.session_state.ai_result = "[INVALID_REF]"
+                    # --- DRAFT 1: Standard Balanced ---
+                    status.write("Draft 1: Generating Standard Theological View...")
+                    prompt_1 = base_prompt_template.format(ref=reference, focus="Standard balanced evangelical theology.")
+                    draft_1 = model.generate_content(prompt_1).text
+                    
+                    if "[INVALID_REF]" in draft_1:
+                         st.session_state.ai_result = "[INVALID_REF]"
+                         status.update(label="Error: Invalid Reference", state="error")
                     else:
-                        # Step 2: Generate Draft B (Ask for a different perspective)
-                        draft_b = model.generate_content(base_prompt + "\n (Focus on slightly different theological nuances)").text
+                        # --- DRAFT 2: Historical Focus ---
+                        status.write("Draft 2: Digging into Historical & Cultural Context...")
+                        prompt_2 = base_prompt_template.format(ref=reference, focus="Deep historical, cultural, and linguistic context.")
+                        draft_2 = model.generate_content(prompt_2).text
+
+                        # --- DRAFT 3: Application Focus ---
+                        status.write("Draft 3: Focusing on Modern Life Application...")
+                        prompt_3 = base_prompt_template.format(ref=reference, focus="Practical application for modern daily life and personal struggles.")
+                        draft_3 = model.generate_content(prompt_3).text
                         
-                        # Step 3: Consolidate
+                        # --- MERGE STEP ---
+                        status.write("Final Step: Merging and Polishing...")
                         merge_prompt = f"""
-                        I have two study guides for {reference}. Please combine them into ONE superior version.
-                        - Keep the best questions from both.
-                        - Merge the historical and theological insights to be more complete.
-                        - STRICTLY follow the [CHINESE] and [ENGLISH] format.
+                        You are an expert editor. I have generated three different study guides for "{reference}".
+                        
+                        Draft 1 (Standard): {draft_1}
+                        Draft 2 (Historical): {draft_2}
+                        Draft 3 (Application): {draft_3}
 
-                        Draft A:
-                        {draft_a}
-
-                        Draft B:
-                        {draft_b}
+                        Your Goal: Create ONE Master Version.
+                        1. Select the most insightful "Observation" question from the drafts.
+                        2. Select the deepest "Interpretation" question.
+                        3. Select the most challenging "Application" question.
+                        4. Combine the historical facts and theological meanings into a rich summary.
+                        5. STRICTLY output in the [CHINESE] and [ENGLISH] format.
                         """
                         final_response = model.generate_content(merge_prompt)
                         st.session_state.ai_result = final_response.text
+                        status.update(label="Complete! (完成)", state="complete", expanded=False)
+
                 else:
-                    # Standard Mode (Fast)
-                    response = model.generate_content(base_prompt)
+                    # Standard Mode (Single Shot)
+                    status.write("Consulting the text...")
+                    prompt = base_prompt_template.format(ref=reference, focus="Standard balanced theology.")
+                    response = model.generate_content(prompt)
                     st.session_state.ai_result = response.text
+                    status.update(label="Complete!", state="complete", expanded=False)
 
             except Exception as e:
                 st.error(f"發生錯誤 (Error): {e}")
+                status.update(label="Error", state="error")
     else:
         st.warning("請輸入有效的經文引用。")
 
@@ -157,7 +177,7 @@ if st.session_state.ai_result:
     
     if ch_text is None:
         st.error("❌ 無法識別該經文引用。請輸入有效的聖經章節（例如：約翰福音 3:16）。")
-        st.info("Invalid scriptural reference. Please enter a valid Bible passage (e.g., John 3:16).")
+        st.info("Invalid scriptural reference. Please enter a valid Bible passage.")
     else:
         sim_text = cc.convert(ch_text)
         st.divider()
