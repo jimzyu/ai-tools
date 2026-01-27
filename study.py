@@ -21,7 +21,7 @@ genai.configure(api_key=API_KEY)
 generation_config = genai.types.GenerationConfig(temperature=0.3)
 
 model = genai.GenerativeModel(
-    model_name='gemini-2.5-pro', 
+    model_name='gemini-2.5-flash', 
     generation_config=generation_config,
     system_instruction=(
         "You are a Chinese-American pastor with a conservative evangelical background. "
